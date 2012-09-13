@@ -3,13 +3,14 @@ fm = function() {
     Async = splunkjs.Async;
     utils = splunkjs.Utils;
     UI = splunkjs.UI;
-    var http = splunkjs.ProxyHttp("/proxy");
+    var http = new splunkjs.ProxyHttp("/proxy");
     fm.service = new splunkjs.Service(http, {
         "scheme": "https",
-        "host": "http://ec2-107-22-141-104.compute-1.amazonaws.com/",
+        "host": "ec2-174-129-77-220.compute-1.amazonaws.com",
         "port": 8089,
         "username": "admin",
-        "password": "hackathon"
+        "password": "hackathon",
+        "version": 5.0
     });
 }
 
@@ -17,13 +18,13 @@ fm = function() {
 ** Search Splunk.  Takes full splunk search string and calls a callback with (err, results)
 */
 fm.prototype.rtsearch = function(searchstr, callback, donecallback) {
-    var splunkbot = this;
+    var fm = this;
     var donecallback = donecallback || function () { };
     var MAX_COUNT = 10 * 60; // 10 Minutes
     Async.chain([
             // First, we log in
             function(done) {
-                splunkbot.service.login(done);
+                fm.service.login(done);
             },
             // Perform the search
             function(success, done) {
@@ -31,7 +32,7 @@ fm.prototype.rtsearch = function(searchstr, callback, donecallback) {
                     done("Error logging in");
                 }
             
-                splunkbot.service.search(
+                fm.service.search(
                     searchstr, 
                     {earliest_time: "rt-1m", latest_time: "rt", auto_cancel: MAX_COUNT, max_time: MAX_COUNT}, 
                     done);
@@ -106,9 +107,88 @@ fm.prototype.rtsearch = function(searchstr, callback, donecallback) {
     );
 }
 
+fm.prototype.search = function(searchstr, callback) {
+    var fm = this;
+    
+    Async.chain([
+            // First, we log in
+            function(done) {
+                fm.service.login(done);
+            },
+            // Perform the search
+            function(success, done) {
+                if (!success) {
+                    done("Error logging in");
+                }
+
+                fm.service.search(searchstr, { max_results: 10000 }, done);
+            },
+            // Wait until the job is done
+            function(job, done) {
+                Async.whilst(
+                    // Loop until it is done
+                    function() { return !job.properties().isDone; },
+                    // Refresh the job on every iteration, but sleep for 1 second
+                    function(iterationDone) {
+                        Async.sleep(1000, function() {
+                            // Refresh the job and note how many events we've looked at so far
+                            job.fetch(function(err) {
+                                console.log("-- fetching, " + (job.properties().eventCount || 0) + " events so far");
+                                iterationDone();
+                            });
+                        });
+                    },
+                    // When we're done, just pass the job forward
+                    function(err) {
+                        console.log("-- job done --");
+                        done(err, job);
+                    }
+                );
+            },
+            // Print out the statistics and get the results
+            function(job, done) {
+                // Print out the statics
+                console.log("Job Statistics: ");
+                console.log("  Event Count: " + job.properties().eventCount);
+                console.log("  Disk Usage: " + job.properties().diskUsage + " bytes");
+                console.log("  Priority: " + job.properties().priority);
+
+                // Ask the server for the results
+                job.results({ count: 10000 }, done);
+            },
+            // Print the raw results out
+            function(results, job, done) {
+                // Find the index of the fields we want
+                var rawIndex        = utils.indexOf(results.fields, "_raw");
+                var sourcetypeIndex = utils.indexOf(results.fields, "sourcetype");
+                var userIndex       = utils.indexOf(results.fields, "user");
+
+                // Print out each result and the key-value pairs we want
+                console.log("Results: ");
+                for(var i = 0; i < results.rows.length; i++) {
+                    console.log("  Result " + i + ": ");
+                    console.log("    sourcetype: " + results.rows[i][sourcetypeIndex]);
+                    console.log("    user: " + results.rows[i][userIndex]);
+                    console.log("    _raw: " + results.rows[i][rawIndex]);
+                }
+                
+                callback(undefined, results);
+
+                // Once we're done, cancel the job.
+                job.cancel(done);
+            }
+        ],
+        function(err) {
+            if (err) {
+                callback(err); 
+            }       
+        }
+    );
+}
+
 fm.prototype.map = function() {
     searchstring = "| inputlookup test"
-    fm.rtsearch(searchstring, function(err, results) {
+    fm.search(searchstring, function(err, results) {
         var rows = results.rows;
         var fields = results.fields;
         // var types = [ 'circle', 'star', 'triangle' ];
@@ -184,7 +264,7 @@ fm.prototype.map = function() {
           elem: false,
           write: function(text){
             if (!this.elem) 
-              this.elem = document.getElementById('errortext');
+              this.elem = document.getElementById('log');
             this.elem.innerHTML = text;
             this.elem.style.left = (500 - this.elem.offsetWidth / 2) + 'px';
           }
@@ -194,7 +274,7 @@ fm.prototype.map = function() {
         // Copy and pasted from http://thejit.org/static/v20/Jit/Examples/ForceDirected/example1.code.html
         var fd = new $jit.ForceDirected({  
           //id of the visualization container  
-          injectInto: 'map',  
+          injectInto: 'canvas',  
           //Enable zooming and panning  
           //by scrolling and DnD  
           Navigation: {  
@@ -315,158 +395,22 @@ fm.prototype.map = function() {
         });
 
 
-    }, function() { });
-
-    // Channel variable gets set by page template
-    $.getJSON('/splunkbot/map_'+encodeURIComponent(channel)+'.json', function(json) {
-        spinner.spin();
-        var labelType, useGradients, nativeTextSupport, animate;
-        
-        var ua = navigator.userAgent,
-            iStuff = ua.match(/iPhone/i) || ua.match(/iPad/i),
-            typeOfCanvas = typeof HTMLCanvasElement,
-            nativeCanvasSupport = (typeOfCanvas == 'object' || typeOfCanvas == 'function'),
-            textSupport = nativeCanvasSupport 
-              && (typeof document.createElement('canvas').getContext('2d').fillText == 'function');
-        //I'm setting this based on the fact that ExCanvas provides text support for IE
-        //and that as of today iPhone/iPad current text support is lame
-        labelType = (!nativeCanvasSupport || (textSupport && !iStuff))? 'Native' : 'HTML';
-        nativeTextSupport = labelType == 'Native';
-        useGradients = nativeCanvasSupport;
-        animate = !(iStuff || !nativeCanvasSupport);
-        
-        var Log = {
-          elem: false,
-          write: function(text){
-            if (!this.elem) 
-              this.elem = document.getElementById('errortext');
-            this.elem.innerHTML = text;
-            this.elem.style.left = (500 - this.elem.offsetWidth / 2) + 'px';
-          }
-        };
-        
-        
-        // Copy and pasted from http://thejit.org/static/v20/Jit/Examples/ForceDirected/example1.code.html
-        var fd = new $jit.ForceDirected({  
-          //id of the visualization container  
-          injectInto: 'map',  
-          //Enable zooming and panning  
-          //by scrolling and DnD  
-          Navigation: {  
-            enable: true,  
-            //Enable panning events only if we're dragging the empty  
-            //canvas (and not a node).  
-            panning: 'avoid nodes',  
-            zooming: 10 //zoom speed. higher is more sensible  
-          },  
-          // Change node and edge styles such as  
-          // color and width.  
-          // These properties are also set per node  
-          // with dollar prefixed data-properties in the  
-          // JSON structure.  
-          Node: {  
-            overridable: true  
-          },  
-          Edge: {  
-            overridable: true,  
-            color: '#23A4FF',  
-            lineWidth: 0.4  
-          },  
-          //Native canvas text styling  
-          Label: {  
-            type: labelType, //Native or HTML  
-            size: 10,  
-            style: 'bold'  
-          },  
-          //Add Tips  
-          Tips: {  
-            enable: true,  
-            onShow: function(tip, node) {  
-              //count connections  
-              var count = 0;  
-              node.eachAdjacency(function() { count++; });  
-              //display node info in tooltip  
-              tip.innerHTML = "<div class=\"tip-title\">" + node.name + "</div>"  
-                + "<div class=\"tip-text\"><b>connections:</b> " + count + "</div>";  
-            }  
-          },  
-          // Add node events  
-          Events: {  
-            enable: true,  
-            type: 'Native',  
-            //Change cursor style when hovering a node  
-            onMouseEnter: function() {  
-              fd.canvas.getElement().style.cursor = 'move';  
-            },  
-            onMouseLeave: function() {  
-              fd.canvas.getElement().style.cursor = '';  
-            },  
-            //Update node positions when dragged  
-            onDragMove: function(node, eventInfo, e) {  
-                var pos = eventInfo.getPos();  
-                node.pos.setc(pos.x, pos.y);  
-                fd.plot();  
-            },  
-            //Implement the same handler for touchscreens  
-            onTouchMove: function(node, eventInfo, e) {  
-              $jit.util.event.stop(e); //stop default touchmove event  
-              this.onDragMove(node, eventInfo, e);  
-            },  
-            //Add also a click handler to nodes  
-            onClick: function(node) {  
-              if(!node) return;  
-              // Build the right column relations list.  
-              // This is done by traversing the clicked node connections.  
-              var html = "<h4>" + node.name + "</h4><b> connections:</b><ul><li>",  
-                  list = [];  
-              node.eachAdjacency(function(adj){  
-                list.push(adj.nodeTo.name);  
-              });  
-              //append connections information  
-              $jit.id('inner-details').innerHTML = html + list.join("</li><li>") + "</li></ul>";  
-            }  
-          },  
-          //Number of iterations for the FD algorithm  
-          iterations: 200,  
-          //Edge length  
-          levelDistance: 130,  
-          // Add text to the labels. This method is only triggered  
-          // on label creation and only for DOM labels (not native canvas ones).  
-          onCreateLabel: function(domElement, node){  
-            domElement.innerHTML = node.name;  
-            var style = domElement.style;  
-            style.fontSize = "0.8em";  
-            style.color = "#ddd";  
-          },  
-          // Change node styles when DOM labels are placed  
-          // or moved.  
-          onPlaceLabel: function(domElement, node){  
-            var style = domElement.style;  
-            var left = parseInt(style.left);  
-            var top = parseInt(style.top);  
-            var w = domElement.offsetWidth;  
-            style.left = (left - w / 2) + 'px';  
-            style.top = (top + 10) + 'px';  
-            style.display = '';  
-          }  
-        });  
-        // load JSON data.  
-        fd.loadJSON(json);  
-        // compute positions incrementally and animate.  
-        fd.computeIncremental({  
-          iter: 40,  
-          property: 'end',  
-          onStep: function(perc){  
-            Log.write(perc + '% loaded...');  
-          },  
-          onComplete: function(){  
-            Log.write('done');  
-            fd.animate({  
-              modes: ['linear'],  
-              transition: $jit.Trans.Elastic.easeOut,  
-              duration: 2500  
-            });  
-          }  
-        });
     });
 }
+
+$(document).ready(function() {
+    fm = new fm();
+    
+    // Decode query string, copy and pasted code from somewhere
+    // urlParams = {};
+    // var e,
+    //     a = /\+/g,  // Regex for replacing addition symbol with a space
+    //     r = /([^&=]+)=?([^&]*)/g,
+    //     d = function (s) { return decodeURIComponent(s.replace(a, " ")); },
+    //     q = window.location.search.substring(1);
+
+    // while (e = r.exec(q))
+    //    urlParams[d(e[1])] = d(e[2]);
+
+    fm.map();
+});

@@ -89,3 +89,11 @@ body {
 .splunk-server-forwarder .badge {
 	background: url(images/badge_forward.png);	
 }
+
+#canvas {
+	position: absolute;
+	top: 41px;
+	bottom: 0px;
+	right: 300px;
+	left: 0px;
+}
