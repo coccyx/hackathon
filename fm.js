@@ -105,3 +105,368 @@ fm.prototype.rtsearch = function(searchstr, callback, donecallback) {
         }
     );
 }
+
+fm.prototype.map = function() {
+    searchstring = "| inputlookup test"
+    fm.rtsearch(searchstring, function(err, results) {
+        var rows = results.rows;
+        var fields = results.fields;
+        // var types = [ 'circle', 'star', 'triangle' ];
+        // var colors = [ "#800000", // dark red
+        //                "#FF0000", // red
+        //                "#FF00FF", // pink
+        //                "#008000", // teal
+        //                "#00FFFF", // cyan
+        //                "#008000", // green
+        //                "#00FF00", // bright green
+        //                "#000080", // green
+        //                "#0000FF", // blue
+        //                "#800080", // violet
+        //                "#808000", // dark yellow
+        //                "#FFFF00" ] // yellow
+
+        // console.log(JSON.stringify(results, null, 2));
+        
+        var json = [ ];
+        var currentIndexer = "";
+        var adjacenciesIdx = 0;
+        var indexerIdx = 0;
+        var color = "";
+        var type = ""
+        for (var i = 0; i < rows.length; i++) {
+                
+            // We've encountered a new nick, start a new JSON object
+            if (currentIndexer != rows[i][fields.indexOf('Indexer')]) {
+                if (i !== 0) {
+                    indexerIdx++;
+                }
+                // console.log(util.format("%d currentIndexer: %s newNick: %s", i, currentIndexer, rows[i][fields.indexOf('nick')]));
+                currentIndexer = rows[i][fields.indexOf('Indexer')];
+                color = "#0080000";
+                // color = colors[indexerIdx % 12];
+                // type = types[indexerIdx % 3];
+                adjacenciesIdx = 0;
+                json[indexerIdx] = { };
+                json[indexerIdx].id = currentIndexer;
+                json[indexerIdx].name = currentIndexer;
+                json[indexerIdx].data = { };
+                json[indexerIdx].data['$color'] = color;
+                json[indexerIdx].data['$type'] = "circle";
+                json[indexerIdx].data['$dim'] = 12;
+                json[indexerIdx].adjacencies = [ ];
+            }
+            // console.log(util.format("adjacenciesIdx %s", adjacenciesIdx));
+            json[indexerIdx].adjacencies[adjacenciesIdx] = { }
+            json[indexerIdx].adjacencies[adjacenciesIdx].nodeFrom = currentIndexer;
+            json[indexerIdx].adjacencies[adjacenciesIdx].nodeTo = rows[i][fields.indexOf('Forwarder')];
+            json[indexerIdx].adjacencies[adjacenciesIdx].data = { };
+            json[indexerIdx].adjacencies[adjacenciesIdx].data['$color'] = color;
+            json[indexerIdx].adjacencies[adjacenciesIdx].data['$lineWidth'] = rows[i][fields.indexOf('Weight')];
+            adjacenciesIdx++;
+        }
+
+        var labelType, useGradients, nativeTextSupport, animate;
+        
+        var ua = navigator.userAgent,
+            iStuff = ua.match(/iPhone/i) || ua.match(/iPad/i),
+            typeOfCanvas = typeof HTMLCanvasElement,
+            nativeCanvasSupport = (typeOfCanvas == 'object' || typeOfCanvas == 'function'),
+            textSupport = nativeCanvasSupport 
+              && (typeof document.createElement('canvas').getContext('2d').fillText == 'function');
+        //I'm setting this based on the fact that ExCanvas provides text support for IE
+        //and that as of today iPhone/iPad current text support is lame
+        labelType = (!nativeCanvasSupport || (textSupport && !iStuff))? 'Native' : 'HTML';
+        nativeTextSupport = labelType == 'Native';
+        useGradients = nativeCanvasSupport;
+        animate = !(iStuff || !nativeCanvasSupport);
+        
+        var Log = {
+          elem: false,
+          write: function(text){
+            if (!this.elem) 
+              this.elem = document.getElementById('errortext');
+            this.elem.innerHTML = text;
+            this.elem.style.left = (500 - this.elem.offsetWidth / 2) + 'px';
+          }
+        };
+        
+        
+        // Copy and pasted from http://thejit.org/static/v20/Jit/Examples/ForceDirected/example1.code.html
+        var fd = new $jit.ForceDirected({  
+          //id of the visualization container  
+          injectInto: 'map',  
+          //Enable zooming and panning  
+          //by scrolling and DnD  
+          Navigation: {  
+            enable: true,  
+            //Enable panning events only if we're dragging the empty  
+            //canvas (and not a node).  
+            panning: 'avoid nodes',  
+            zooming: 10 //zoom speed. higher is more sensible  
+          },  
+          // Change node and edge styles such as  
+          // color and width.  
+          // These properties are also set per node  
+          // with dollar prefixed data-properties in the  
+          // JSON structure.  
+          Node: {  
+            overridable: true  
+          },  
+          Edge: {  
+            overridable: true,  
+            color: '#23A4FF',  
+            lineWidth: 0.4  
+          },  
+          //Native canvas text styling  
+          Label: {  
+            type: labelType, //Native or HTML  
+            size: 10,  
+            style: 'bold'  
+          },  
+          //Add Tips  
+          Tips: {  
+            enable: true,  
+            onShow: function(tip, node) {  
+              //count connections  
+              var count = 0;  
+              node.eachAdjacency(function() { count++; });  
+              //display node info in tooltip  
+              tip.innerHTML = "<div class=\"tip-title\">" + node.name + "</div>"  
+                + "<div class=\"tip-text\"><b>connections:</b> " + count + "</div>";  
+            }  
+          },  
+          // Add node events  
+          Events: {  
+            enable: true,  
+            type: 'Native',  
+            //Change cursor style when hovering a node  
+            onMouseEnter: function() {  
+              fd.canvas.getElement().style.cursor = 'move';  
+            },  
+            onMouseLeave: function() {  
+              fd.canvas.getElement().style.cursor = '';  
+            },  
+            //Update node positions when dragged  
+            onDragMove: function(node, eventInfo, e) {  
+                var pos = eventInfo.getPos();  
+                node.pos.setc(pos.x, pos.y);  
+                fd.plot();  
+            },  
+            //Implement the same handler for touchscreens  
+            onTouchMove: function(node, eventInfo, e) {  
+              $jit.util.event.stop(e); //stop default touchmove event  
+              this.onDragMove(node, eventInfo, e);  
+            },  
+            //Add also a click handler to nodes  
+            onClick: function(node) {  
+              if(!node) return;  
+              // Build the right column relations list.  
+              // This is done by traversing the clicked node connections.  
+              var html = "<h4>" + node.name + "</h4><b> connections:</b><ul><li>",  
+                  list = [];  
+              node.eachAdjacency(function(adj){  
+                list.push(adj.nodeTo.name);  
+              });  
+              //append connections information  
+              $jit.id('inner-details').innerHTML = html + list.join("</li><li>") + "</li></ul>";  
+            }  
+          },  
+          //Number of iterations for the FD algorithm  
+          iterations: 200,  
+          //Edge length  
+          levelDistance: 130,  
+          // Add text to the labels. This method is only triggered  
+          // on label creation and only for DOM labels (not native canvas ones).  
+          onCreateLabel: function(domElement, node){  
+            domElement.innerHTML = node.name;  
+            var style = domElement.style;  
+            style.fontSize = "0.8em";  
+            style.color = "#ddd";  
+          },  
+          // Change node styles when DOM labels are placed  
+          // or moved.  
+          onPlaceLabel: function(domElement, node){  
+            var style = domElement.style;  
+            var left = parseInt(style.left);  
+            var top = parseInt(style.top);  
+            var w = domElement.offsetWidth;  
+            style.left = (left - w / 2) + 'px';  
+            style.top = (top + 10) + 'px';  
+            style.display = '';  
+          }  
+        });  
+        // load JSON data.  
+        fd.loadJSON(json);  
+        // compute positions incrementally and animate.  
+        fd.computeIncremental({  
+          iter: 40,  
+          property: 'end',  
+          onStep: function(perc){  
+            Log.write(perc + '% loaded...');  
+          },  
+          onComplete: function(){  
+            Log.write('done');  
+            fd.animate({  
+              modes: ['linear'],  
+              transition: $jit.Trans.Elastic.easeOut,  
+              duration: 2500  
+            });  
+          }  
+        });
+
+
+    }, function() { });
+
+    // Channel variable gets set by page template
+    $.getJSON('/splunkbot/map_'+encodeURIComponent(channel)+'.json', function(json) {
+        spinner.spin();
+        var labelType, useGradients, nativeTextSupport, animate;
+        
+        var ua = navigator.userAgent,
+            iStuff = ua.match(/iPhone/i) || ua.match(/iPad/i),
+            typeOfCanvas = typeof HTMLCanvasElement,
+            nativeCanvasSupport = (typeOfCanvas == 'object' || typeOfCanvas == 'function'),
+            textSupport = nativeCanvasSupport 
+              && (typeof document.createElement('canvas').getContext('2d').fillText == 'function');
+        //I'm setting this based on the fact that ExCanvas provides text support for IE
+        //and that as of today iPhone/iPad current text support is lame
+        labelType = (!nativeCanvasSupport || (textSupport && !iStuff))? 'Native' : 'HTML';
+        nativeTextSupport = labelType == 'Native';
+        useGradients = nativeCanvasSupport;
+        animate = !(iStuff || !nativeCanvasSupport);
+        
+        var Log = {
+          elem: false,
+          write: function(text){
+            if (!this.elem) 
+              this.elem = document.getElementById('errortext');
+            this.elem.innerHTML = text;
+            this.elem.style.left = (500 - this.elem.offsetWidth / 2) + 'px';
+          }
+        };
+        
+        
+        // Copy and pasted from http://thejit.org/static/v20/Jit/Examples/ForceDirected/example1.code.html
+        var fd = new $jit.ForceDirected({  
+          //id of the visualization container  
+          injectInto: 'map',  
+          //Enable zooming and panning  
+          //by scrolling and DnD  
+          Navigation: {  
+            enable: true,  
+            //Enable panning events only if we're dragging the empty  
+            //canvas (and not a node).  
+            panning: 'avoid nodes',  
+            zooming: 10 //zoom speed. higher is more sensible  
+          },  
+          // Change node and edge styles such as  
+          // color and width.  
+          // These properties are also set per node  
+          // with dollar prefixed data-properties in the  
+          // JSON structure.  
+          Node: {  
+            overridable: true  
+          },  
+          Edge: {  
+            overridable: true,  
+            color: '#23A4FF',  
+            lineWidth: 0.4  
+          },  
+          //Native canvas text styling  
+          Label: {  
+            type: labelType, //Native or HTML  
+            size: 10,  
+            style: 'bold'  
+          },  
+          //Add Tips  
+          Tips: {  
+            enable: true,  
+            onShow: function(tip, node) {  
+              //count connections  
+              var count = 0;  
+              node.eachAdjacency(function() { count++; });  
+              //display node info in tooltip  
+              tip.innerHTML = "<div class=\"tip-title\">" + node.name + "</div>"  
+                + "<div class=\"tip-text\"><b>connections:</b> " + count + "</div>";  
+            }  
+          },  
+          // Add node events  
+          Events: {  
+            enable: true,  
+            type: 'Native',  
+            //Change cursor style when hovering a node  
+            onMouseEnter: function() {  
+              fd.canvas.getElement().style.cursor = 'move';  
+            },  
+            onMouseLeave: function() {  
+              fd.canvas.getElement().style.cursor = '';  
+            },  
+            //Update node positions when dragged  
+            onDragMove: function(node, eventInfo, e) {  
+                var pos = eventInfo.getPos();  
+                node.pos.setc(pos.x, pos.y);  
+                fd.plot();  
+            },  
+            //Implement the same handler for touchscreens  
+            onTouchMove: function(node, eventInfo, e) {  
+              $jit.util.event.stop(e); //stop default touchmove event  
+              this.onDragMove(node, eventInfo, e);  
+            },  
+            //Add also a click handler to nodes  
+            onClick: function(node) {  
+              if(!node) return;  
+              // Build the right column relations list.  
+              // This is done by traversing the clicked node connections.  
+              var html = "<h4>" + node.name + "</h4><b> connections:</b><ul><li>",  
+                  list = [];  
+              node.eachAdjacency(function(adj){  
+                list.push(adj.nodeTo.name);  
+              });  
+              //append connections information  
+              $jit.id('inner-details').innerHTML = html + list.join("</li><li>") + "</li></ul>";  
+            }  
+          },  
+          //Number of iterations for the FD algorithm  
+          iterations: 200,  
+          //Edge length  
+          levelDistance: 130,  
+          // Add text to the labels. This method is only triggered  
+          // on label creation and only for DOM labels (not native canvas ones).  
+          onCreateLabel: function(domElement, node){  
+            domElement.innerHTML = node.name;  
+            var style = domElement.style;  
+            style.fontSize = "0.8em";  
+            style.color = "#ddd";  
+          },  
+          // Change node styles when DOM labels are placed  
+          // or moved.  
+          onPlaceLabel: function(domElement, node){  
+            var style = domElement.style;  
+            var left = parseInt(style.left);  
+            var top = parseInt(style.top);  
+            var w = domElement.offsetWidth;  
+            style.left = (left - w / 2) + 'px';  
+            style.top = (top + 10) + 'px';  
+            style.display = '';  
+          }  
+        });  
+        // load JSON data.  
+        fd.loadJSON(json);  
+        // compute positions incrementally and animate.  
+        fd.computeIncremental({  
+          iter: 40,  
+          property: 'end',  
+          onStep: function(perc){  
+            Log.write(perc + '% loaded...');  
+          },  
+          onComplete: function(){  
+            Log.write('done');  
+            fd.animate({  
+              modes: ['linear'],  
+              transition: $jit.Trans.Elastic.easeOut,  
+              duration: 2500  
+            });  
+          }  
+        });
+    });
+}
